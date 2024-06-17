@@ -1,6 +1,7 @@
 #ifndef __MONO_VISUAL_ODOMETRY_H__
 #define __MONO_VISUAL_ODOMETRY_H__
 
+#include <opencv2/opencv.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/image.hpp>
 
@@ -10,7 +11,7 @@ public:
 
 private:
   void imageCallback();
-  void featureExtract();
+  std::vector<cv::Point2f> featureExtract(const cv::Mat &image);
   void featureMatching();
   void bundleAdjustment();
 
