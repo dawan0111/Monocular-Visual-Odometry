@@ -16,3 +16,5 @@ std::vector<cv::Point2f> MonoVisualOdometry::featureExtract(const cv::Mat &image
 
   return points1;
 }
+
+void MonoVisualOdometry::featureMatching(const FrameData &prevFrameData, const FrameData &frameData) {}
