@@ -10,6 +10,9 @@ set(library_name sv_lib)
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(cv_bridge REQUIRED)
 find_package(g2o REQUIRED)
 # uncomment the following section in order to fill in
 # further dependencies manually.
@@ -32,6 +35,9 @@ target_link_libraries(${library_name}
 ament_target_dependencies(${library_name}
   rclcpp
   sensor_msgs
+  nav_msgs
+  geometry_msgs
+  cv_bridge
 )
 
 add_executable(mono_visual_odometry_node
