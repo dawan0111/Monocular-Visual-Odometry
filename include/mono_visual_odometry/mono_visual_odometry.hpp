@@ -3,6 +3,7 @@
 #include <cv_bridge/cv_bridge.h>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <nav_msgs/msg/path.hpp>
+#include <opencv2/features2d.hpp>
 #include <opencv2/opencv.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/image.hpp>
@@ -16,8 +17,8 @@ public:
   explicit MonoVisualOdometry(const rclcpp::NodeOptions &);
 
 private:
-  void imageCallback();
-  std::vector<cv::Point2f> featureExtract(const cv::Mat &image);
+  void imageCallback(const sensor_msgs::msg::Image::ConstSharedPtr &leftImage);
+  std::vector<cv::Point2f> featureExtract(const FrameData &frameData);
   void featureMatching(const FrameData &prevFrameData, const FrameData &frameData);
   void bundleAdjustment();
   void debugImagePublish();

@@ -14,6 +14,7 @@ find_package(nav_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(g2o REQUIRED)
+find_package(OpenCV REQUIRED)
 # uncomment the following section in order to fill in
 # further dependencies manually.
 # find_package(<dependency> REQUIRED)
@@ -38,6 +39,7 @@ ament_target_dependencies(${library_name}
   nav_msgs
   geometry_msgs
   cv_bridge
+  OpenCV
 )
 
 add_executable(mono_visual_odometry_node

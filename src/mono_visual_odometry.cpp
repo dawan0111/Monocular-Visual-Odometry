@@ -4,17 +4,21 @@ MonoVisualOdometry::MonoVisualOdometry(const rclcpp::NodeOptions &options) : Nod
 
   debugImagePub_ = this->create_publisher<sensor_msgs::msg::Image>("/stereo/image", 10);
   pathPub_ = this->create_publisher<nav_msgs::msg::Path>("/stereo/path", 10);
+  imageSub_ = this->create_subscription<sensor_msgs::msg::Image>(
+      "/mono/image", 10, std::bind(&MonoVisualOdometry::imageCallback, this, std::placeholders::_1));
 
   auto interval = std::chrono::duration<double>(1.0);
   timer_ = this->create_wall_timer(interval, [this]() -> void { RCLCPP_INFO(this->get_logger(), "Timer RUN!!"); });
 }
 
-std::vector<cv::Point2f> MonoVisualOdometry::featureExtract(const cv::Mat &image) {
+void MonoVisualOdometry::imageCallback(const sensor_msgs::msg::Image::ConstSharedPtr &leftImage) {}
+
+std::vector<cv::Point2f> MonoVisualOdometry::featureExtract(const FrameData &frameData) {
   std::vector<cv::KeyPoint> keypoints_1;
   std::vector<cv::Point2f> points1;
   int fast_threshold = 20;
   bool nonmaxSuppression = true;
-  cv::FAST(image, keypoints_1, fast_threshold, nonmaxSuppression);
+  cv::FAST(frameData.image, keypoints_1, fast_threshold, nonmaxSuppression);
   cv::KeyPoint::convert(keypoints_1, points1, std::vector<int>());
 
   return points1;
