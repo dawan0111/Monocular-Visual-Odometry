@@ -11,6 +11,7 @@ struct FrameData {
   cv::Mat image;
   std::vector<cv::Point2f> keyPoints;
   int32_t frameId;
+  int16_t inlinerCount;
 };
 class MonoVisualOdometry : public rclcpp::Node {
 public:
@@ -18,10 +19,11 @@ public:
 
 private:
   void imageCallback(const sensor_msgs::msg::Image::ConstSharedPtr &leftImage);
-  std::vector<cv::Point2f> featureExtract(const FrameData &frameData);
-  void featureMatching(const FrameData &prevFrameData, const FrameData &frameData);
+  void featureExtract(FrameData &frameData);
+  void featureMatching(FrameData &prevFrameData, FrameData &frameData);
+  void getPose(const FrameData &prevFrameData, const FrameData &frameData);
   void bundleAdjustment();
-  void debugImagePublish();
+  void debugImagePublish(const FrameData &frameData);
   void pathPublish();
 
 private:
@@ -32,6 +34,9 @@ private:
 
   std::vector<FrameData> frames_;
   std::vector<geometry_msgs::msg::PoseStamped> poses_;
+  FrameData currFrame_;
+
+  int32_t frameId_;
 };
 
 #endif // __MONO_VISUAL_ODOMETRY_H__
