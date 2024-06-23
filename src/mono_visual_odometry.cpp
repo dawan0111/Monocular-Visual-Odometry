@@ -104,7 +104,11 @@ void MonoVisualOdometry::debugImagePublish(const FrameData &frameData) {
   if (frames_.size() > 0) {
     auto debugImage = frameData.image.clone();
     for (auto &keyPoint : frameData.keyPoints) {
-      cv::circle(debugImage, keyPoint.point, 2, cv::Scalar(0, 255, 0), 1, cv::LINE_4, 0);
+      cv::circle(debugImage, keyPoint.point, 4, cv::Scalar(0, 255, 0), 1, cv::LINE_4, 0);
+      if (keyPoint.prev != nullptr) {
+        cv::circle(debugImage, keyPoint.prev->point, 4, cv::Scalar(0, 255, 255), 1, cv::LINE_4, 0);
+        cv::arrowedLine(debugImage, keyPoint.point, keyPoint.prev->point, cv::Scalar(0, 255, 255), 1);
+      }
     }
     auto message = cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", debugImage).toImageMsg();
     message->header.stamp = this->get_clock()->now();

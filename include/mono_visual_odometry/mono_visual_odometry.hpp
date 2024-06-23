@@ -15,7 +15,10 @@ struct Point {
   Point *next;
   bool isInliner;
 
-  Point(int16_t id_, cv::Point2f point_, bool isInliner_) : id(id_), point(point_), isInliner(isInliner_){};
+  Point(int16_t id_, cv::Point2f point_, bool isInliner_) : id(id_), point(point_), isInliner(isInliner_) {
+    prev = nullptr;
+    next = nullptr;
+  };
 };
 struct FrameData {
   cv::Mat image;
