@@ -7,11 +7,27 @@
 #include <opencv2/opencv.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/image.hpp>
+
+struct Point {
+  int16_t id;
+  cv::Point2f point;
+  Point *prev;
+  Point *next;
+  bool isInliner;
+
+  Point(int16_t id_, cv::Point2f point_, bool isInliner_) : id(id_), point(point_), isInliner(isInliner_){};
+};
 struct FrameData {
   cv::Mat image;
-  std::vector<cv::Point2f> keyPoints;
+  std::vector<Point> keyPoints;
   int32_t frameId;
   int16_t inlinerCount;
+
+  Point *getKeyPoint(int16_t id) {
+    auto it = std::find_if(keyPoints.begin(), keyPoints.end(), [id](const Point &d) { return d.id == id; });
+
+    return it != keyPoints.end() ? &(*it) : nullptr;
+  }
 };
 class MonoVisualOdometry : public rclcpp::Node {
 public:
