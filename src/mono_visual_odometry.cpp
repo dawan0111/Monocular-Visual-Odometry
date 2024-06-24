@@ -74,10 +74,6 @@ void MonoVisualOdometry::featureMatching(FrameData &prevFrameData, FrameData &fr
 
   cv::calcOpticalFlowPyrLK(prevFrameData.image, frameData.image, prevPoints, nextPoints, status, err, winSize, 3,
                            termcrit, 0, 0.001);
-
-  // std::cout << "P size: " << prevPoints.size() << std::endl;
-  // std::cout << "N size: " << nextPoints.size() << std::endl;
-
   for (int i = 0; i < status.size(); i++) {
     auto prevPoints = prevPointers[i];
     auto pt = nextPoints[i];
@@ -98,6 +94,51 @@ void MonoVisualOdometry::featureMatching(FrameData &prevFrameData, FrameData &fr
   }
 
   frameData.inlinerCount = inlinerCount;
+}
+
+void MonoVisualOdometry::featureTracking(FrameData &frameData) {
+  std::vector<cv::Point2f> prevPoints;
+  std::vector<cv::Point2f> nextPoints;
+
+  std::for_each(frameData.keyPoints.begin(), frameData.keyPoints.end(),
+                [&prevPoints, &nextPoints](const Point &keyPoint) {
+                  prevPoints.push_back(keyPoint.prev->point);
+                  nextPoints.push_back(keyPoint.point);
+                });
+
+  /**
+   * TODO: change to configure value
+   */
+  double focal = 718.8560;
+  cv::Point2d pp(607.1928, 185.2157);
+
+  cv::Mat K = (cv::Mat_<double>(3, 3) << focal, 0, pp.x, 0, focal, pp.y, 0, 0, 1);
+  cv::Mat mask, R, t;
+  int16_t inlinerCount;
+
+  auto E = cv::findEssentialMat(nextPoints, prevPoints, K, cv::RANSAC, 0.9999, 1.0, mask);
+  cv::recoverPose(E, nextPoints, prevPoints, R, t, K, mask);
+
+  Eigen::Matrix3d eR;
+  Eigen::Vector3d et;
+  eR = Eigen::Map<Eigen::Matrix<double, 3, 3, Eigen::RowMajor>>(R.ptr<double>());
+  et = Eigen::Map<Eigen::Matrix<double, 3, 1, Eigen::RowMajor>>(t.ptr<double>());
+
+  Eigen::Isometry3d pose = Eigen::Isometry3d::Identity();
+  pose.rotate(eR);
+  pose.pretranslate(et);
+
+  frameData.pose = pose;
+
+  for (int i = 0; i < mask.rows; ++i) {
+    if (!mask.at<uchar>(i)) {
+      frameData.keyPoints[i].isInliner = false;
+      frameData.keyPoints[i].prev->isInliner = false;
+    } else {
+      ++inlinerCount;
+    }
+  }
+  std::cout << "Inliner count: " << inlinerCount << std::endl;
 }
 
 void MonoVisualOdometry::debugImagePublish(const FrameData &frameData) {

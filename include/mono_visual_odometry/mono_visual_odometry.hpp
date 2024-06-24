@@ -1,5 +1,6 @@
 #ifndef __MONO_VISUAL_ODOMETRY_H__
 #define __MONO_VISUAL_ODOMETRY_H__
+#include <Eigen/Dense>
 #include <cv_bridge/cv_bridge.h>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <nav_msgs/msg/path.hpp>
@@ -26,9 +27,10 @@ struct FrameData {
   int32_t frameId;
   int16_t inlinerCount;
 
+  Eigen::Isometry3d pose;
+
   Point *getKeyPoint(int16_t id) {
     auto it = std::find_if(keyPoints.begin(), keyPoints.end(), [id](const Point &d) { return d.id == id; });
-
     return it != keyPoints.end() ? &(*it) : nullptr;
   }
 };
@@ -40,6 +42,7 @@ private:
   void imageCallback(const sensor_msgs::msg::Image::ConstSharedPtr &leftImage);
   void featureExtract(FrameData &frameData);
   void featureMatching(FrameData &prevFrameData, FrameData &frameData);
+  void featureTracking(FrameData &frameData);
   void getPose(const FrameData &prevFrameData, const FrameData &frameData);
   void bundleAdjustment();
   void debugImagePublish(const FrameData &frameData);
@@ -56,6 +59,8 @@ private:
   FrameData currFrame_;
 
   int32_t frameId_;
+
+  cv::Mat camK_;
 };
 
 #endif // __MONO_VISUAL_ODOMETRY_H__
