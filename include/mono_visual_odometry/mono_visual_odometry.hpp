@@ -8,6 +8,7 @@
 #include <opencv2/opencv.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/image.hpp>
+#include <sophus/se3.hpp>
 
 struct Point {
   int16_t id;
@@ -27,7 +28,7 @@ struct FrameData {
   int32_t frameId;
   int16_t inlinerCount;
 
-  Eigen::Isometry3d pose;
+  Sophus::SE3d pose;
 
   Point *getKeyPoint(int16_t id) {
     auto it = std::find_if(keyPoints.begin(), keyPoints.end(), [id](const Point &d) { return d.id == id; });
@@ -47,6 +48,7 @@ private:
   void bundleAdjustment();
   void debugImagePublish(const FrameData &frameData);
   void pathPublish();
+  void updatePath(const FrameData &frameData);
 
 private:
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr imageSub_;
@@ -61,6 +63,8 @@ private:
   int32_t frameId_;
 
   cv::Mat camK_;
+  Sophus::SE3d latestPose_;
+  Sophus::SE3d T_optical_world_;
 };
 
 #endif // __MONO_VISUAL_ODOMETRY_H__

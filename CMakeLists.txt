@@ -12,9 +12,11 @@ find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(tf2_eigen REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(g2o REQUIRED)
 find_package(OpenCV REQUIRED)
+find_package(Sophus REQUIRED)
 # uncomment the following section in order to fill in
 # further dependencies manually.
 # find_package(<dependency> REQUIRED)
@@ -31,6 +33,7 @@ add_library(${library_name}
 target_link_libraries(${library_name}
   g2o_core
   g2o_stuff
+  Sophus::Sophus
 )
 
 ament_target_dependencies(${library_name}
@@ -40,6 +43,7 @@ ament_target_dependencies(${library_name}
   geometry_msgs
   cv_bridge
   OpenCV
+  tf2_eigen
 )
 
 add_executable(mono_visual_odometry_node
