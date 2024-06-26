@@ -24,10 +24,11 @@ struct Point {
 };
 struct FrameData {
   cv::Mat image;
+  cv::Mat grayImage;
   std::vector<Point> keyPoints;
   int32_t frameId;
   int16_t inlinerCount;
-
+  bool isInliner;
   Sophus::SE3d pose;
 
   Point *getKeyPoint(int16_t id) {
@@ -56,7 +57,7 @@ private:
   rclcpp::TimerBase::SharedPtr timer_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pathPub_;
 
-  std::vector<FrameData> frames_;
+  std::vector<std::unique_ptr<FrameData>> frames_;
   std::vector<geometry_msgs::msg::PoseStamped> poses_;
   FrameData currFrame_;
 

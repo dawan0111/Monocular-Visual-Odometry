@@ -2,7 +2,7 @@
 MonoVisualOdometry::MonoVisualOdometry(const rclcpp::NodeOptions &options) : Node("mono_visual_odometry", options) {
   RCLCPP_INFO(this->get_logger(), "MonoVisualOdometry");
 
-  debugImagePub_ = this->create_publisher<sensor_msgs::msg::Image>("/mono/image", 10);
+  debugImagePub_ = this->create_publisher<sensor_msgs::msg::Image>("/mono/image", 50);
   pathPub_ = this->create_publisher<nav_msgs::msg::Path>("/mono/path", 10);
   imageSub_ = this->create_subscription<sensor_msgs::msg::Image>(
       "/stereo/image_left", 10, std::bind(&MonoVisualOdometry::imageCallback, this, std::placeholders::_1));
@@ -20,43 +20,56 @@ MonoVisualOdometry::MonoVisualOdometry(const rclcpp::NodeOptions &options) : Nod
 }
 
 void MonoVisualOdometry::imageCallback(const sensor_msgs::msg::Image::ConstSharedPtr &image) {
-  RCLCPP_INFO(this->get_logger(), "Image Callback!!");
-  FrameData frame;
-
-  frame.image = cv_bridge::toCvCopy(image, image->encoding)->image;
-  frame.frameId = frameId_;
-  frame.keyPoints.reserve(2000);
+  auto frame = std::make_unique<FrameData>();
+  frame->image = cv_bridge::toCvCopy(image, image->encoding)->image;
+  cv::cvtColor(frame->image, frame->grayImage, cv::COLOR_BGR2GRAY);
+  frame->frameId = frameId_;
+  frame->keyPoints.reserve(6000);
+  frame->isInliner = true;
+  frame->inlinerCount = 0;
   frames_.push_back(std::move(frame));
 
-  // featureExtract(frame);
+  auto &currFrame = frames_[frameId_];
 
   if (frames_.size() <= 1) {
-    featureExtract(frames_[frameId_]);
+    featureExtract(*currFrame);
+    frameId_++;
   } else {
-    featureMatching(frames_[frameId_ - 1], frames_[frameId_]);
-    featureTracking(frames_[frameId_]);
+    const auto copyPrevFrame = *frames_[frameId_ - 1];
+    auto &prevFrame = frames_[frameId_ - 1];
 
-    if (frames_[frameId_].inlinerCount < 200) {
-      RCLCPP_INFO(this->get_logger(), "ReExtract FrameData");
-      frames_[frameId_].keyPoints.clear();
-      featureExtract(frames_[frameId_]);
+    featureMatching(*prevFrame, *currFrame);
+    featureTracking(*currFrame);
+
+    if (currFrame->isInliner) {
+      updatePath(*currFrame);
+      pathPublish();
+      debugImagePublish(*currFrame);
+
+      std::cout << "Inliner: " << currFrame->inlinerCount << std::endl;
+
+      if (currFrame->inlinerCount < 500) {
+        std::cout << "Re FrameId: " << frameId_ << std::endl;
+        currFrame->keyPoints.clear();
+        featureExtract(*currFrame);
+      }
+
+      frameId_++;
+    } else {
+      RCLCPP_INFO(this->get_logger(), "Stop frame!!");
+      prevFrame = std::make_unique<FrameData>(copyPrevFrame);
+      frames_.erase(frames_.end() - 1);
     }
   }
-
-  std::cout << "Inliner Count: " << frames_[frameId_].inlinerCount << std::endl;
-
-  updatePath(frames_[frameId_]);
-  pathPublish();
-  debugImagePublish(frames_[frameId_]);
-  frameId_++;
 }
 
 void MonoVisualOdometry::featureExtract(FrameData &frameData) {
   std::vector<cv::KeyPoint> keypoints_1;
-  int fast_threshold = 20;
+  int fast_threshold = 40;
   int16_t id = 0;
   bool nonmaxSuppression = true;
-  cv::FAST(frameData.image, keypoints_1, fast_threshold, nonmaxSuppression);
+  cv::Mat image;
+  cv::FAST(frameData.grayImage, keypoints_1, fast_threshold, nonmaxSuppression);
 
   for (auto &keyPoint : keypoints_1) {
     frameData.keyPoints.emplace_back(id, keyPoint.pt, true);
@@ -83,8 +96,11 @@ void MonoVisualOdometry::featureMatching(FrameData &prevFrameData, FrameData &fr
     }
   });
 
-  cv::calcOpticalFlowPyrLK(prevFrameData.image, frameData.image, prevPoints, nextPoints, status, err, winSize, 3,
-                           termcrit, 0, 0.001);
+  cv::Mat prevImage;
+  cv::Mat image;
+
+  cv::calcOpticalFlowPyrLK(prevFrameData.grayImage, frameData.grayImage, prevPoints, nextPoints, status, err, winSize,
+                           3, termcrit, 0, 0.001);
   for (int i = 0; i < status.size(); i++) {
     auto prevPoints = prevPointers[i];
     auto pt = nextPoints[i];
@@ -113,8 +129,10 @@ void MonoVisualOdometry::featureTracking(FrameData &frameData) {
 
   std::for_each(frameData.keyPoints.begin(), frameData.keyPoints.end(),
                 [&prevPoints, &nextPoints](const Point &keyPoint) {
-                  prevPoints.push_back(keyPoint.prev->point);
-                  nextPoints.push_back(keyPoint.point);
+                  if (keyPoint.isInliner) {
+                    prevPoints.push_back(keyPoint.prev->point);
+                    nextPoints.push_back(keyPoint.point);
+                  }
                 });
   /**
    * TODO: change to configure value
@@ -124,9 +142,8 @@ void MonoVisualOdometry::featureTracking(FrameData &frameData) {
 
   cv::Mat K = (cv::Mat_<double>(3, 3) << focal, 0, pp.x, 0, focal, pp.y, 0, 0, 1);
   cv::Mat mask, R, t;
-  int16_t inlinerCount;
 
-  auto E = cv::findEssentialMat(nextPoints, prevPoints, K, cv::RANSAC, 0.9999, 1.0, mask);
+  auto E = cv::findEssentialMat(nextPoints, prevPoints, K, cv::RANSAC, 0.999, 1.0, mask);
   cv::recoverPose(E, nextPoints, prevPoints, K, R, t, mask);
 
   Eigen::Matrix3d eR;
@@ -143,54 +160,63 @@ void MonoVisualOdometry::featureTracking(FrameData &frameData) {
   et(2) = t.at<double>(2);
 
   frameData.pose = Sophus::SE3d(eR, et);
+  auto angleNorm = frameData.pose.so3().log().norm();
+  // et(2) < et(0) || et(2) < et(1) ||
 
-  for (int i = 0; i < mask.rows; ++i) {
-    if (mask.at<uchar>(i)) {
-      ++inlinerCount;
-    }
+  if (std::abs(angleNorm) > 2 || et(2) <= 0) {
+    frameData.isInliner = false;
   }
-  std::cout << "Pose Inliner count: " << inlinerCount << std::endl;
 }
 
 void MonoVisualOdometry::updatePath(const FrameData &frameData) {
-  latestPose_ = latestPose_ * frameData.pose;
-  geometry_msgs::msg::PoseStamped poseStampMsg;
-  poseStampMsg.header.stamp = this->get_clock()->now();
-  poseStampMsg.header.frame_id = "map";
+  if (frameData.isInliner) {
+    auto updatePose = latestPose_ * frameData.pose;
+    geometry_msgs::msg::PoseStamped poseStampMsg;
+    poseStampMsg.header.stamp = this->get_clock()->now();
+    poseStampMsg.header.frame_id = "map";
 
-  auto worldPose = T_optical_world_ * latestPose_;
+    auto worldPose = T_optical_world_ * updatePose;
 
-  geometry_msgs::msg::Pose pose;
-  Eigen::Quaterniond q(worldPose.rotationMatrix());
-  pose.orientation.x = q.x();
-  pose.orientation.y = q.y();
-  pose.orientation.z = q.z();
-  pose.orientation.w = q.w();
+    double xDiff = updatePose.translation().x() - latestPose_.translation().x();
+    double yDiff = updatePose.translation().y() - latestPose_.translation().y();
+    double zDiff = updatePose.translation().z() - latestPose_.translation().z();
 
-  pose.position.x = worldPose.translation().x();
-  pose.position.y = worldPose.translation().y();
-  pose.position.z = worldPose.translation().z();
-  poseStampMsg.pose = pose;
+    auto scale = std::sqrt(xDiff * xDiff + yDiff * yDiff + zDiff * zDiff);
 
-  poses_.push_back(std::move(poseStampMsg));
+    // std::cout << "yDiff: " << yDiff * yDiff << std::endl;
+    // std::cout << "zDiff: " << zDiff * zDiff << std::endl;
+
+    geometry_msgs::msg::Pose pose;
+    Eigen::Quaterniond q(worldPose.rotationMatrix());
+    pose.orientation.x = q.x();
+    pose.orientation.y = q.y();
+    pose.orientation.z = q.z();
+    pose.orientation.w = q.w();
+
+    pose.position.x = worldPose.translation().x();
+    pose.position.y = worldPose.translation().y();
+    pose.position.z = worldPose.translation().z();
+    poseStampMsg.pose = pose;
+
+    poses_.push_back(std::move(poseStampMsg));
+    latestPose_ = updatePose;
+  }
 }
 
 void MonoVisualOdometry::debugImagePublish(const FrameData &frameData) {
-  if (frames_.size() > 0) {
-    auto debugImage = frameData.image.clone();
-    for (auto &keyPoint : frameData.keyPoints) {
-      if (keyPoint.isInliner) {
-        cv::circle(debugImage, keyPoint.point, 4, cv::Scalar(0, 255, 0), 1, cv::LINE_4, 0);
-        if (keyPoint.prev != nullptr) {
-          cv::arrowedLine(debugImage, keyPoint.point, keyPoint.prev->point, cv::Scalar(0, 255, 255), 1);
-          cv::circle(debugImage, keyPoint.prev->point, 4, cv::Scalar(255, 0, 0), 1, cv::LINE_4, 0);
-        }
+  auto debugImage = frameData.image.clone();
+  for (auto &keyPoint : frameData.keyPoints) {
+    if (keyPoint.isInliner) {
+      cv::circle(debugImage, keyPoint.point, 4, cv::Scalar(0, 255, 0), 1, cv::LINE_4, 0);
+      if (keyPoint.prev != nullptr) {
+        cv::arrowedLine(debugImage, keyPoint.point, keyPoint.prev->point, cv::Scalar(0, 255, 255), 1);
+        cv::circle(debugImage, keyPoint.prev->point, 4, cv::Scalar(255, 0, 0), 1, cv::LINE_4, 0);
       }
     }
-    auto message = cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", debugImage).toImageMsg();
-    message->header.stamp = this->get_clock()->now();
-    debugImagePub_->publish(*message);
   }
+  auto message = cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", debugImage).toImageMsg();
+  message->header.stamp = this->get_clock()->now();
+  debugImagePub_->publish(*message);
 }
 
 void MonoVisualOdometry::pathPublish() {
