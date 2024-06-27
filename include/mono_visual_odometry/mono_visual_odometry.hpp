@@ -8,6 +8,8 @@
 #include <opencv2/opencv.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/image.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
+#include <sensor_msgs/point_cloud2_iterator.hpp>
 #include <sophus/se3.hpp>
 
 struct Point {
@@ -16,10 +18,12 @@ struct Point {
   Point *prev;
   Point *next;
   bool isInliner;
+  Eigen::Vector3d worldPoint;
 
   Point(int16_t id_, cv::Point2f point_, bool isInliner_) : id(id_), point(point_), isInliner(isInliner_) {
     prev = nullptr;
     next = nullptr;
+    worldPoint = Eigen::Vector3d::Identity();
   };
 };
 struct FrameData {
@@ -45,15 +49,17 @@ private:
   void featureExtract(FrameData &frameData);
   void featureMatching(FrameData &prevFrameData, FrameData &frameData);
   void featureTracking(FrameData &frameData);
-  void getPose(const FrameData &prevFrameData, const FrameData &frameData);
+  void updateWorldPoint(FrameData &frameData);
   void bundleAdjustment();
   void debugImagePublish(const FrameData &frameData);
   void pathPublish();
+  void pointCloudPublish(const FrameData &frameData);
   void updatePath(const FrameData &frameData);
 
 private:
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr imageSub_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debugImagePub_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pointCloudPub_;
   rclcpp::TimerBase::SharedPtr timer_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pathPub_;
 

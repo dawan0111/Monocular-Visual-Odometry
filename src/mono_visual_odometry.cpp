@@ -4,6 +4,7 @@ MonoVisualOdometry::MonoVisualOdometry(const rclcpp::NodeOptions &options) : Nod
 
   debugImagePub_ = this->create_publisher<sensor_msgs::msg::Image>("/mono/image", 50);
   pathPub_ = this->create_publisher<nav_msgs::msg::Path>("/mono/path", 10);
+  pointCloudPub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/mono/pointcloud", 10);
   imageSub_ = this->create_subscription<sensor_msgs::msg::Image>(
       "/stereo/image_left", 10, std::bind(&MonoVisualOdometry::imageCallback, this, std::placeholders::_1));
 
@@ -42,13 +43,14 @@ void MonoVisualOdometry::imageCallback(const sensor_msgs::msg::Image::ConstShare
     featureTracking(*currFrame);
 
     if (currFrame->isInliner) {
+      updateWorldPoint(*currFrame);
       updatePath(*currFrame);
       pathPublish();
       debugImagePublish(*currFrame);
 
       std::cout << "Inliner: " << currFrame->inlinerCount << std::endl;
 
-      if (currFrame->inlinerCount < 500) {
+      if (currFrame->inlinerCount < 250) {
         std::cout << "Re FrameId: " << frameId_ << std::endl;
         currFrame->keyPoints.clear();
         featureExtract(*currFrame);
@@ -168,6 +170,48 @@ void MonoVisualOdometry::featureTracking(FrameData &frameData) {
   }
 }
 
+void MonoVisualOdometry::updateWorldPoint(FrameData &frameData) {
+  auto poseMatrix = frameData.pose.matrix3x4();
+  auto keyPoints = frameData.keyPoints;
+
+  std::vector<cv::Point2f> prevPoints, currPoints;
+  std::vector<Point *> pointPointers;
+
+  for (auto &keyPoint : keyPoints) {
+    if (keyPoint.isInliner && keyPoint.prev != nullptr) {
+      prevPoints.push_back(keyPoint.prev->point);
+      currPoints.push_back(keyPoint.point);
+      pointPointers.push_back(&keyPoint);
+    }
+  }
+
+  /* clang-format off */
+  cv::Mat T1 = (cv::Mat_<double>(3, 4) << 
+    1, 0, 0, 0,
+    0, 1, 0, 0,
+    0, 0, 1, 0);
+  cv::Mat T2 = (cv::Mat_<double>(3, 4) <<
+    poseMatrix(0, 0), poseMatrix(0, 1), poseMatrix(0, 2), poseMatrix(0, 0),
+    poseMatrix(1, 0), poseMatrix(1, 1), poseMatrix(1, 2), poseMatrix(1, 0),
+    poseMatrix(2, 0), poseMatrix(2, 1), poseMatrix(2, 2), poseMatrix(2, 0));
+  /* clang-format on */
+
+  cv::Mat worldHomoPoints;
+  cv::triangulatePoints(T1, T2, prevPoints, currPoints, worldHomoPoints);
+
+  for (int i = 0; i < worldHomoPoints.cols; ++i) {
+    cv::Mat x = worldHomoPoints.col(i);
+    Eigen::Vector3d worldPoint = Eigen::Vector3d::Identity();
+    x /= x.at<double>(3, 0);
+
+    worldPoint(0) = x.at<double>(0, 0);
+    worldPoint(1) = x.at<double>(1, 0);
+    worldPoint(2) = x.at<double>(2, 0);
+
+    pointPointers[i]->worldPoint = worldPoint;
+  }
+}
+
 void MonoVisualOdometry::updatePath(const FrameData &frameData) {
   if (frameData.isInliner) {
     auto updatePose = latestPose_ * frameData.pose;
@@ -176,15 +220,6 @@ void MonoVisualOdometry::updatePath(const FrameData &frameData) {
     poseStampMsg.header.frame_id = "map";
 
     auto worldPose = T_optical_world_ * updatePose;
-
-    double xDiff = updatePose.translation().x() - latestPose_.translation().x();
-    double yDiff = updatePose.translation().y() - latestPose_.translation().y();
-    double zDiff = updatePose.translation().z() - latestPose_.translation().z();
-
-    auto scale = std::sqrt(xDiff * xDiff + yDiff * yDiff + zDiff * zDiff);
-
-    // std::cout << "yDiff: " << yDiff * yDiff << std::endl;
-    // std::cout << "zDiff: " << zDiff * zDiff << std::endl;
 
     geometry_msgs::msg::Pose pose;
     Eigen::Quaterniond q(worldPose.rotationMatrix());
@@ -226,4 +261,40 @@ void MonoVisualOdometry::pathPublish() {
   pathMsg.poses = poses_;
 
   pathPub_->publish(pathMsg);
+}
+
+void MonoVisualOdometry::pointCloudPublish(const FrameData &frameData) {
+  std::vector<Eigen::Vector3d> vector;
+
+  for (const auto &keyPoint : frameData.keyPoints) {
+    if (keyPoint.isInliner) {
+      vector.push_back(keyPoint.worldPoint);
+    }
+  }
+
+  auto pointCloud = sensor_msgs::msg::PointCloud2();
+  pointCloud.height = 1;
+  pointCloud.width = vector.size();
+  pointCloud.is_dense = false;
+  sensor_msgs::PointCloud2Modifier modifier(pointCloud);
+  modifier.setPointCloud2Fields(3, "x", 1, sensor_msgs::msg::PointField::FLOAT32, "y", 1,
+                                sensor_msgs::msg::PointField::FLOAT32, "z", 1, sensor_msgs::msg::PointField::FLOAT32);
+
+  sensor_msgs::PointCloud2Iterator<float> iter_x(pointCloud, "x");
+  sensor_msgs::PointCloud2Iterator<float> iter_y(pointCloud, "y");
+  sensor_msgs::PointCloud2Iterator<float> iter_z(pointCloud, "z");
+
+  for (const auto &vec : vector) {
+    // std::cout << vec << std::endl;
+    *iter_x = static_cast<float>(vec(0));
+    *iter_y = static_cast<float>(vec(1));
+    *iter_z = static_cast<float>(vec(2));
+    ++iter_x;
+    ++iter_y;
+    ++iter_z;
+  }
+
+  pointCloud.header.frame_id = cameraOpticalFrameId_;
+  pointCloud.header.stamp = this->get_clock()->now();
+  pointCloudPub_->publish(pointCloud);
 }
