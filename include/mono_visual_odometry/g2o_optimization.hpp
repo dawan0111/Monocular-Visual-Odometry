@@ -9,8 +9,22 @@
 #include <g2o/solvers/csparse/linear_solver_csparse.h>
 
 class G2O_Optimization {
+  using BlockSolverType = g2o::BlockSolver<g2o::BlockSolverTraits<6, 3>>;
+  using LinearSolverType = g2o::LinearSolverCSparse<BlockSolverType::PoseMatrixType>;
+  using WorldPoints = std::vector<Eigen::Vector3d>;
+  using CameraPoints = std::vector<Eigen::Vector2d>;
+
 public:
   G2O_Optimization();
+  ~G2O_Optimization();
+  void updatePoseVertex();
+  void updateEdge();
+  void clear();
+  void optimize();
+
+private:
+  std::unique_ptr<g2o::SparseOptimizer> optimizer_;
+  g2o::OptimizationAlgorithmLevenberg *solver_;
 };
 
 #endif // __G2O_OPTIMIZATION_H__
