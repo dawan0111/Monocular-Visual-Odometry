@@ -18,6 +18,10 @@ MonoVisualOdometry::MonoVisualOdometry(const rclcpp::NodeOptions &options) : Nod
   Eigen::Matrix4d T_optical_world;
   T_optical_world << 0.0, 0.0, 1.0, 0.0, -1.0, 0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0;
   T_optical_world_ = Sophus::SE3d(T_optical_world);
+
+  double focal = 718.8560;
+  cv::Point2d pp(607.1928, 185.2157);
+  camK_ = (cv::Mat_<double>(3, 3) << focal, 0, pp.x, 0, focal, pp.y, 0, 0, 1);
 }
 
 void MonoVisualOdometry::imageCallback(const sensor_msgs::msg::Image::ConstSharedPtr &image) {
@@ -45,8 +49,10 @@ void MonoVisualOdometry::imageCallback(const sensor_msgs::msg::Image::ConstShare
     if (currFrame->isInliner) {
       updateWorldPoint(*currFrame);
       updatePath(*currFrame);
-      pathPublish();
+
+      pointCloudPublish(*currFrame);
       debugImagePublish(*currFrame);
+      pathPublish();
 
       std::cout << "Inliner: " << currFrame->inlinerCount << std::endl;
 
@@ -139,10 +145,8 @@ void MonoVisualOdometry::featureTracking(FrameData &frameData) {
   /**
    * TODO: change to configure value
    */
-  double focal = 718.8560;
-  cv::Point2d pp(607.1928, 185.2157);
 
-  cv::Mat K = (cv::Mat_<double>(3, 3) << focal, 0, pp.x, 0, focal, pp.y, 0, 0, 1);
+  cv::Mat K = camK_;
   cv::Mat mask, R, t;
 
   auto E = cv::findEssentialMat(nextPoints, prevPoints, K, cv::RANSAC, 0.999, 1.0, mask);
@@ -172,43 +176,52 @@ void MonoVisualOdometry::featureTracking(FrameData &frameData) {
 
 void MonoVisualOdometry::updateWorldPoint(FrameData &frameData) {
   auto poseMatrix = frameData.pose.matrix3x4();
-  auto keyPoints = frameData.keyPoints;
 
   std::vector<cv::Point2f> prevPoints, currPoints;
   std::vector<Point *> pointPointers;
 
-  for (auto &keyPoint : keyPoints) {
+  for (auto &keyPoint : frameData.keyPoints) {
     if (keyPoint.isInliner && keyPoint.prev != nullptr) {
-      prevPoints.push_back(keyPoint.prev->point);
-      currPoints.push_back(keyPoint.point);
+      const auto &prevPoint = keyPoint.prev->point;
+      const auto &currPoint = keyPoint.point;
+
+      prevPoints.emplace_back((prevPoint.x - camK_.at<double>(0, 2)) / camK_.at<double>(0, 0),
+                              (prevPoint.y - camK_.at<double>(1, 2)) / camK_.at<double>(1, 1));
+      currPoints.emplace_back((currPoint.x - camK_.at<double>(0, 2)) / camK_.at<double>(0, 0),
+                              (currPoint.y - camK_.at<double>(1, 2)) / camK_.at<double>(1, 1));
       pointPointers.push_back(&keyPoint);
     }
   }
 
   /* clang-format off */
-  cv::Mat T1 = (cv::Mat_<double>(3, 4) << 
+  cv::Mat T1 = (cv::Mat_<float>(3, 4) << 
     1, 0, 0, 0,
     0, 1, 0, 0,
     0, 0, 1, 0);
-  cv::Mat T2 = (cv::Mat_<double>(3, 4) <<
-    poseMatrix(0, 0), poseMatrix(0, 1), poseMatrix(0, 2), poseMatrix(0, 0),
-    poseMatrix(1, 0), poseMatrix(1, 1), poseMatrix(1, 2), poseMatrix(1, 0),
-    poseMatrix(2, 0), poseMatrix(2, 1), poseMatrix(2, 2), poseMatrix(2, 0));
+  cv::Mat T2 = (cv::Mat_<float>(3, 4) <<
+    poseMatrix(0, 0), poseMatrix(0, 1), poseMatrix(0, 2), poseMatrix(0, 3),
+    poseMatrix(1, 0), poseMatrix(1, 1), poseMatrix(1, 2), poseMatrix(1, 3),
+    poseMatrix(2, 0), poseMatrix(2, 1), poseMatrix(2, 2), poseMatrix(2, 3));
   /* clang-format on */
 
   cv::Mat worldHomoPoints;
-  cv::triangulatePoints(T1, T2, prevPoints, currPoints, worldHomoPoints);
+
+  cv::triangulatePoints(T1, T2, currPoints, prevPoints, worldHomoPoints);
 
   for (int i = 0; i < worldHomoPoints.cols; ++i) {
     cv::Mat x = worldHomoPoints.col(i);
     Eigen::Vector3d worldPoint = Eigen::Vector3d::Identity();
-    x /= x.at<double>(3, 0);
 
-    worldPoint(0) = x.at<double>(0, 0);
-    worldPoint(1) = x.at<double>(1, 0);
-    worldPoint(2) = x.at<double>(2, 0);
+    x /= x.at<float>(3, 0);
 
+    worldPoint(0) = x.at<float>(0, 0);
+    worldPoint(1) = x.at<float>(1, 0);
+    worldPoint(2) = x.at<float>(2, 0);
     pointPointers[i]->worldPoint = worldPoint;
+
+    if (worldPoint(2) <= 0 || worldPoint(2) >= 100) {
+      pointPointers[i]->isInliner = false;
+    }
   }
 }
 
@@ -268,6 +281,7 @@ void MonoVisualOdometry::pointCloudPublish(const FrameData &frameData) {
 
   for (const auto &keyPoint : frameData.keyPoints) {
     if (keyPoint.isInliner) {
+      // std::cout << "Point: " << keyPoint.worldPoint << std::endl;
       vector.push_back(keyPoint.worldPoint);
     }
   }
@@ -285,7 +299,6 @@ void MonoVisualOdometry::pointCloudPublish(const FrameData &frameData) {
   sensor_msgs::PointCloud2Iterator<float> iter_z(pointCloud, "z");
 
   for (const auto &vec : vector) {
-    // std::cout << vec << std::endl;
     *iter_x = static_cast<float>(vec(0));
     *iter_y = static_cast<float>(vec(1));
     *iter_z = static_cast<float>(vec(2));
@@ -294,7 +307,7 @@ void MonoVisualOdometry::pointCloudPublish(const FrameData &frameData) {
     ++iter_z;
   }
 
-  pointCloud.header.frame_id = cameraOpticalFrameId_;
+  pointCloud.header.frame_id = "camera_optical_link";
   pointCloud.header.stamp = this->get_clock()->now();
   pointCloudPub_->publish(pointCloud);
 }

@@ -23,7 +23,7 @@ struct Point {
   Point(int16_t id_, cv::Point2f point_, bool isInliner_) : id(id_), point(point_), isInliner(isInliner_) {
     prev = nullptr;
     next = nullptr;
-    worldPoint = Eigen::Vector3d::Identity();
+    worldPoint = Eigen::Vector3d::Zero();
   };
 };
 struct FrameData {
