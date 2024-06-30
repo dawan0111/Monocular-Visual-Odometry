@@ -22,17 +22,28 @@ MonoVisualOdometry::MonoVisualOdometry(const rclcpp::NodeOptions &options) : Nod
   double focal = 718.8560;
   cv::Point2d pp(607.1928, 185.2157);
   camK_ = (cv::Mat_<double>(3, 3) << focal, 0, pp.x, 0, focal, pp.y, 0, 0, 1);
+
+  Eigen::Matrix3d EigenCamK = Eigen::Matrix3d::Identity();
+
+  EigenCamK(0, 0) = focal;
+  EigenCamK(1, 1) = focal;
+  EigenCamK(0, 2) = pp.x;
+  EigenCamK(1, 2) = pp.y;
+
+  g2oOptimizer_ = std::make_unique<G2O_Optimization>(EigenCamK);
 }
 
 void MonoVisualOdometry::imageCallback(const sensor_msgs::msg::Image::ConstSharedPtr &image) {
-  auto frame = std::make_unique<FrameData>();
+  auto frame = std::make_shared<FrameData>();
   frame->image = cv_bridge::toCvCopy(image, image->encoding)->image;
   cv::cvtColor(frame->image, frame->grayImage, cv::COLOR_BGR2GRAY);
   frame->frameId = frameId_;
   frame->keyPoints.reserve(6000);
   frame->isInliner = true;
   frame->inlinerCount = 0;
-  frames_.push_back(std::move(frame));
+  frame->worldPose = Sophus::SE3d(Eigen::Matrix3d::Identity(), Eigen::Vector3d::Zero());
+  frames_.push_back(frame);
+  localFrames_.push_back(frame);
 
   auto &currFrame = frames_[frameId_];
 
@@ -42,6 +53,7 @@ void MonoVisualOdometry::imageCallback(const sensor_msgs::msg::Image::ConstShare
   } else {
     const auto copyPrevFrame = *frames_[frameId_ - 1];
     auto &prevFrame = frames_[frameId_ - 1];
+    currFrame->worldPose = prevFrame->worldPose;
 
     featureMatching(*prevFrame, *currFrame);
     featureTracking(*currFrame);
@@ -54,12 +66,15 @@ void MonoVisualOdometry::imageCallback(const sensor_msgs::msg::Image::ConstShare
       debugImagePublish(*currFrame);
       pathPublish();
 
-      std::cout << "Inliner: " << currFrame->inlinerCount << std::endl;
+      // std::cout << "Inliner: " << currFrame->inlinerCount << std::endl;
 
-      if (currFrame->inlinerCount < 250) {
+      if (currFrame->inlinerCount < 200) {
         std::cout << "Re FrameId: " << frameId_ << std::endl;
+        localBA();
         currFrame->keyPoints.clear();
         featureExtract(*currFrame);
+
+        localFrames_.clear();
       }
 
       frameId_++;
@@ -142,9 +157,6 @@ void MonoVisualOdometry::featureTracking(FrameData &frameData) {
                     nextPoints.push_back(keyPoint.point);
                   }
                 });
-  /**
-   * TODO: change to configure value
-   */
 
   cv::Mat K = camK_;
   cv::Mat mask, R, t;
@@ -166,6 +178,7 @@ void MonoVisualOdometry::featureTracking(FrameData &frameData) {
   et(2) = t.at<double>(2);
 
   frameData.pose = Sophus::SE3d(eR, et);
+  frameData.worldPose = frameData.worldPose * frameData.pose;
   auto angleNorm = frameData.pose.so3().log().norm();
   // et(2) < et(0) || et(2) < et(1) ||
 
@@ -210,19 +223,37 @@ void MonoVisualOdometry::updateWorldPoint(FrameData &frameData) {
 
   for (int i = 0; i < worldHomoPoints.cols; ++i) {
     cv::Mat x = worldHomoPoints.col(i);
-    Eigen::Vector3d worldPoint = Eigen::Vector3d::Identity();
+    Eigen::Vector4d homogenousWorldPoint = Eigen::Vector4d::Identity();
+    Eigen::Vector3d worldPoint = Eigen::Vector3d::Zero();
 
     x /= x.at<float>(3, 0);
 
-    worldPoint(0) = x.at<float>(0, 0);
-    worldPoint(1) = x.at<float>(1, 0);
-    worldPoint(2) = x.at<float>(2, 0);
-    pointPointers[i]->worldPoint = worldPoint;
+    homogenousWorldPoint(0) = x.at<float>(0, 0);
+    homogenousWorldPoint(1) = x.at<float>(1, 0);
+    homogenousWorldPoint(2) = x.at<float>(2, 0);
+    homogenousWorldPoint(3) = 1.0;
 
-    if (worldPoint(2) <= 0 || worldPoint(2) >= 100) {
+    if (homogenousWorldPoint(2) <= 0 || homogenousWorldPoint(2) >= 100) {
       pointPointers[i]->isInliner = false;
+    } else {
+      homogenousWorldPoint = frameData.worldPose * homogenousWorldPoint;
+
+      worldPoint(0) = homogenousWorldPoint(0);
+      worldPoint(1) = homogenousWorldPoint(1);
+      worldPoint(2) = homogenousWorldPoint(2);
+
+      pointPointers[i]->worldPoint = worldPoint;
     }
   }
+}
+
+void MonoVisualOdometry::localBA() {
+  std::cout << "RUN LOCAL BA!!" << std::endl;
+  std::cout << "LocalFrame Count: " << localFrames_.size() << std::endl;
+
+  std::for_each(localFrames_.begin(), localFrames_.end(), [this](const FrameData &frameData) {
+    g2oOptimizer_->addPoseVertex(frameData.frameId, frameData.pose);
+  });
 }
 
 void MonoVisualOdometry::updatePath(const FrameData &frameData) {

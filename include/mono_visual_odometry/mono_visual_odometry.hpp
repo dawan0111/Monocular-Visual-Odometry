@@ -1,5 +1,6 @@
 #ifndef __MONO_VISUAL_ODOMETRY_H__
 #define __MONO_VISUAL_ODOMETRY_H__
+#include "mono_visual_odometry/g2o_optimization.hpp"
 #include <Eigen/Dense>
 #include <cv_bridge/cv_bridge.h>
 #include <geometry_msgs/msg/pose_stamped.hpp>
@@ -34,6 +35,7 @@ struct FrameData {
   int16_t inlinerCount;
   bool isInliner;
   Sophus::SE3d pose;
+  Sophus::SE3d worldPose;
 
   Point *getKeyPoint(int16_t id) {
     auto it = std::find_if(keyPoints.begin(), keyPoints.end(), [id](const Point &d) { return d.id == id; });
@@ -50,7 +52,7 @@ private:
   void featureMatching(FrameData &prevFrameData, FrameData &frameData);
   void featureTracking(FrameData &frameData);
   void updateWorldPoint(FrameData &frameData);
-  void bundleAdjustment();
+  void localBA();
   void debugImagePublish(const FrameData &frameData);
   void pathPublish();
   void pointCloudPublish(const FrameData &frameData);
@@ -63,7 +65,8 @@ private:
   rclcpp::TimerBase::SharedPtr timer_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pathPub_;
 
-  std::vector<std::unique_ptr<FrameData>> frames_;
+  std::vector<std::shared_ptr<FrameData>> frames_;
+  std::vector<std::shared_ptr<FrameData>> localFrames_;
   std::vector<geometry_msgs::msg::PoseStamped> poses_;
   FrameData currFrame_;
 
@@ -72,6 +75,8 @@ private:
   cv::Mat camK_;
   Sophus::SE3d latestPose_;
   Sophus::SE3d T_optical_world_;
+
+  std::unique_ptr<G2O_Optimization> g2oOptimizer_;
 };
 
 #endif // __MONO_VISUAL_ODOMETRY_H__

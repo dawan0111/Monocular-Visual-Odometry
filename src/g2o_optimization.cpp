@@ -6,6 +6,11 @@ G2O_Optimization::G2O_Optimization(Eigen::Matrix3d camK) {
       new g2o::OptimizationAlgorithmLevenberg(g2o::make_unique<BlockSolverType>(g2o::make_unique<LinearSolverType>()));
   optimizer_->setAlgorithm(solver_);
   optimizer_->setVerbose(true);
+
+  double focal_length = 1000.;
+  Eigen::Vector2d principal_point(320., 240.);
+  g2o::CameraParameters *cam_params = new g2o::CameraParameters(focal_length, principal_point, 0.);
+  cam_params->setId(0);
 }
 
 G2O_Optimization::~G2O_Optimization() { delete solver_; }
