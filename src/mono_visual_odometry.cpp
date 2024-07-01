@@ -95,7 +95,7 @@ void MonoVisualOdometry::featureExtract(FrameData &frameData) {
   cv::FAST(frameData.grayImage, keypoints_1, fast_threshold, nonmaxSuppression);
 
   for (auto &keyPoint : keypoints_1) {
-    frameData.keyPoints.emplace_back(id, keyPoint.pt, true);
+    frameData.keyPoints.emplace_back(id, frameData.frameId, keyPoint.pt, true);
     ++id;
   }
   frameData.inlinerCount = keypoints_1.size();
@@ -130,7 +130,7 @@ void MonoVisualOdometry::featureMatching(FrameData &prevFrameData, FrameData &fr
     if (pt.x < 0 || pt.y < 0) {
       status[i] = 0;
     }
-    Point point(i, pt, true);
+    Point point(i, frameData.frameId, pt, true);
     point.prev = prevPoints;
     frameData.keyPoints.push_back(std::move(point));
     prevFrameData.keyPoints[i].next = &frameData.keyPoints[i];
@@ -251,8 +251,45 @@ void MonoVisualOdometry::localBA() {
   std::cout << "RUN LOCAL BA!!" << std::endl;
   std::cout << "LocalFrame Count: " << localFrames_.size() << std::endl;
 
-  std::for_each(localFrames_.begin(), localFrames_.end(), [this](const FrameData &frameData) {
-    g2oOptimizer_->addPoseVertex(frameData.frameId, frameData.pose);
+  const auto &lastLocalFrame = localFrames_.back();
+  const auto &lastKeyPoints = lastLocalFrame->keyPoints;
+  int16_t pointVertexId = lastLocalFrame->frameId + 1;
+  std::cout << "ADD POSE VERTEX" << std::endl;
+  std::for_each(localFrames_.begin(), localFrames_.end(),
+                [this](const auto &frameData) { g2oOptimizer_->addPoseVertex(frameData->frameId, frameData->pose); });
+
+  std::cout << "ADD POINT VERTEX & EDGE" << std::endl;
+  std::for_each(lastKeyPoints.begin(), lastKeyPoints.end(), [this, &pointVertexId](const Point &keyPoint) {
+    if (keyPoint.isInliner) {
+      Eigen::Vector3d mean = Eigen::Vector3d::Zero();
+      int16_t depth = 0;
+      auto currPoint = &keyPoint;
+
+      while (currPoint != nullptr && currPoint->isInliner) {
+        mean += currPoint->worldPoint;
+        currPoint = currPoint->prev;
+        ++depth;
+      }
+
+      mean = mean / depth;
+      g2oOptimizer_->addPointVertex(pointVertexId, mean);
+
+      currPoint = &keyPoint;
+      while (currPoint != nullptr && currPoint->isInliner) {
+        const auto &uvPoint = currPoint->point;
+        Eigen::Vector2d eigenUV = Eigen::Vector2d::Zero();
+        eigenUV(0) = uvPoint.x;
+        eigenUV(1) = uvPoint.y;
+
+        // std::cout << "Edge FrameId: " << currPoint->frameId << std::endl;
+        // std::cout << "Edge PointId: " << pointVertexId << std::endl;
+        // std::cout << "Edge UV coordinate: " << eigenUV << std::endl;
+        g2oOptimizer_->addLandmarkEdge(currPoint->frameId, pointVertexId, eigenUV);
+        currPoint = currPoint->prev;
+      }
+
+      ++pointVertexId;
+    }
   });
 }
 

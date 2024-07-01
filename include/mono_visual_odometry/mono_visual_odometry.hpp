@@ -15,13 +15,15 @@
 
 struct Point {
   int16_t id;
+  int16_t frameId;
   cv::Point2f point;
   Point *prev;
   Point *next;
   bool isInliner;
   Eigen::Vector3d worldPoint;
 
-  Point(int16_t id_, cv::Point2f point_, bool isInliner_) : id(id_), point(point_), isInliner(isInliner_) {
+  Point(int16_t id_, int16_t frameId_, cv::Point2f point_, bool isInliner_)
+      : id(id_), frameId(frameId_), point(point_), isInliner(isInliner_) {
     prev = nullptr;
     next = nullptr;
     worldPoint = Eigen::Vector3d::Zero();

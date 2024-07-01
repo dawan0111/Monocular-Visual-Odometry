@@ -28,11 +28,16 @@ include_directories(
 
 add_library(${library_name}
   src/mono_visual_odometry.cpp
+  src/g2o_optimization.cpp
 )
 
 target_link_libraries(${library_name}
   g2o_core
   g2o_stuff
+  g2o_types_sba
+  g2o_types_slam3d
+  g2o_solver_dense
+  g2o_solver_csparse
   Sophus::Sophus
 )
 

@@ -7,10 +7,12 @@ G2O_Optimization::G2O_Optimization(Eigen::Matrix3d camK) {
   optimizer_->setAlgorithm(solver_);
   optimizer_->setVerbose(true);
 
-  double focal_length = 1000.;
-  Eigen::Vector2d principal_point(320., 240.);
+  double focal_length = camK(0, 0);
+  Eigen::Vector2d principal_point(camK(0, 2), camK(1, 2));
   g2o::CameraParameters *cam_params = new g2o::CameraParameters(focal_length, principal_point, 0.);
   cam_params->setId(0);
+
+  optimizer_->addParameter(cam_params);
 }
 
 G2O_Optimization::~G2O_Optimization() { delete solver_; }
@@ -37,13 +39,13 @@ void G2O_Optimization::addPointVertex(const int16_t &id, const Eigen::Vector3d &
 }
 
 void G2O_Optimization::addLandmarkEdge(int16_t poseId, int16_t landmarkId, const Eigen::Vector2d &measure) {
-  auto edge = new g2o::EdgeProjectXYZ2UV();
-  auto poseVertex = dynamic_cast<g2o::OptimizableGraph::Vertex *>(optimizer_->vertex(poseId));
-  auto landmarkVertex = dynamic_cast<g2o::OptimizableGraph::Vertex *>(optimizer_->vertex(landmarkId));
+  g2o::EdgeProjectXYZ2UV *edge = new g2o::EdgeProjectXYZ2UV();
+  auto poseVertex = optimizer_->vertex(poseId);
+  auto landmarkVertex = optimizer_->vertex(landmarkId);
   g2o::RobustKernelHuber *rk = new g2o::RobustKernelHuber;
 
-  edge->setVertex(0, poseVertex);
-  edge->setVertex(1, landmarkVertex);
+  edge->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex *>(landmarkVertex));
+  edge->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex *>(poseVertex));
   edge->setMeasurement(measure);
   edge->setInformation(Eigen::Matrix2d::Identity());
   edge->setRobustKernel(rk);
@@ -59,6 +61,7 @@ std::vector<Sophus::SE3d> G2O_Optimization::getPose() {
 void G2O_Optimization::clear() {
   optimizer_->clear();
   poseVertexs_.clear();
+  pointVertexs_.clear();
 }
 
 void G2O_Optimization::optimize() {
