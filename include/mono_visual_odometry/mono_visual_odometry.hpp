@@ -59,6 +59,7 @@ private:
   void pathPublish();
   void pointCloudPublish(const FrameData &frameData);
   void updatePath(const FrameData &frameData);
+  void updateAllPath();
 
 private:
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr imageSub_;

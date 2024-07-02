@@ -22,8 +22,6 @@ public:
   void addLandmarkEdge(int16_t poseId, int16_t landmarkId, const Eigen::Vector2d &measure);
   std::vector<Sophus::SE3d> getPose();
   void optimize();
-
-private:
   void clear();
 
 private:

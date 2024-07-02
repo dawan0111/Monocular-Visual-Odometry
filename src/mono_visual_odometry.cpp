@@ -255,8 +255,9 @@ void MonoVisualOdometry::localBA() {
   const auto &lastKeyPoints = lastLocalFrame->keyPoints;
   int16_t pointVertexId = lastLocalFrame->frameId + 1;
   std::cout << "ADD POSE VERTEX" << std::endl;
-  std::for_each(localFrames_.begin(), localFrames_.end(),
-                [this](const auto &frameData) { g2oOptimizer_->addPoseVertex(frameData->frameId, frameData->pose); });
+  std::for_each(localFrames_.begin(), localFrames_.end(), [this](const auto &frameData) {
+    g2oOptimizer_->addPoseVertex(frameData->frameId, frameData->worldPose);
+  });
 
   std::cout << "ADD POINT VERTEX & EDGE" << std::endl;
   std::for_each(lastKeyPoints.begin(), lastKeyPoints.end(), [this, &pointVertexId](const Point &keyPoint) {
@@ -281,9 +282,6 @@ void MonoVisualOdometry::localBA() {
         eigenUV(0) = uvPoint.x;
         eigenUV(1) = uvPoint.y;
 
-        // std::cout << "Edge FrameId: " << currPoint->frameId << std::endl;
-        // std::cout << "Edge PointId: " << pointVertexId << std::endl;
-        // std::cout << "Edge UV coordinate: " << eigenUV << std::endl;
         g2oOptimizer_->addLandmarkEdge(currPoint->frameId, pointVertexId, eigenUV);
         currPoint = currPoint->prev;
       }
@@ -291,11 +289,22 @@ void MonoVisualOdometry::localBA() {
       ++pointVertexId;
     }
   });
+
+  g2oOptimizer_->optimize();
+  auto optimizePoses = g2oOptimizer_->getPose();
+
+  for (int i = 0; i < optimizePoses.size(); ++i) {
+    auto &localFrame = localFrames_[i];
+    localFrame->worldPose = optimizePoses[i];
+  }
+
+  updateAllPath();
+  g2oOptimizer_->clear();
 }
 
 void MonoVisualOdometry::updatePath(const FrameData &frameData) {
   if (frameData.isInliner) {
-    auto updatePose = latestPose_ * frameData.pose;
+    auto updatePose = frameData.worldPose;
     geometry_msgs::msg::PoseStamped poseStampMsg;
     poseStampMsg.header.stamp = this->get_clock()->now();
     poseStampMsg.header.frame_id = "map";
@@ -316,6 +325,26 @@ void MonoVisualOdometry::updatePath(const FrameData &frameData) {
 
     poses_.push_back(std::move(poseStampMsg));
     latestPose_ = updatePose;
+  }
+}
+
+void MonoVisualOdometry::updateAllPath() {
+  for (int i = 0; i < poses_.size(); ++i) {
+    const auto &frameData = frames_[i];
+    const auto &worldPose = T_optical_world_ * frameData->worldPose;
+
+    geometry_msgs::msg::Pose pose;
+    Eigen::Quaterniond q(worldPose.rotationMatrix());
+    pose.orientation.x = q.x();
+    pose.orientation.y = q.y();
+    pose.orientation.z = q.z();
+    pose.orientation.w = q.w();
+
+    pose.position.x = worldPose.translation().x();
+    pose.position.y = worldPose.translation().y();
+    pose.position.z = worldPose.translation().z();
+
+    poses_[i].pose = pose;
   }
 }
 
