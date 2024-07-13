@@ -1,6 +1,5 @@
 #ifndef __MONO_VISUAL_ODOMETRY_H__
 #define __MONO_VISUAL_ODOMETRY_H__
-#include "mono_visual_odometry/g2o_optimization.hpp"
 #include <Eigen/Dense>
 #include <cv_bridge/cv_bridge.h>
 #include <geometry_msgs/msg/pose_stamped.hpp>
@@ -53,8 +52,6 @@ private:
   void featureExtract(FrameData &frameData);
   void featureMatching(FrameData &prevFrameData, FrameData &frameData);
   void featureTracking(FrameData &frameData);
-  void updateWorldPoint(FrameData &frameData);
-  void localBA();
   void debugImagePublish(const FrameData &frameData);
   void pathPublish();
   void pointCloudPublish(const FrameData &frameData);
@@ -76,10 +73,9 @@ private:
   int32_t frameId_;
 
   cv::Mat camK_;
+  Eigen::Matrix3d EigenCamK_;
   Sophus::SE3d latestPose_;
   Sophus::SE3d T_optical_world_;
-
-  std::unique_ptr<G2O_Optimization> g2oOptimizer_;
 };
 
 #endif // __MONO_VISUAL_ODOMETRY_H__
