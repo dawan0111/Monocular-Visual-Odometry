@@ -24,7 +24,7 @@ cd Monocular-Visual-Odometry
 ```
 
 ## Usage
-To launch the Monocular Visual Odometry node, use the following command:
+To launch the Monocular Visual Odometry node, use the following command
 
 ```bash
 ros2 launch mono_visual_odometry mono_visual_odometry_node
